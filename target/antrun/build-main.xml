@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="maven-antrun-" default="main">
+  <target name="main">
+    <copy file="C:\Users\Lenovo\Downloads\mmoitems-master\Hehe\target/Hehe-1.0-SNAPSHOT.jar" todir="C:\Users\Lenovo\Documents\testserver\plugins" />
+  </target>
+</project>

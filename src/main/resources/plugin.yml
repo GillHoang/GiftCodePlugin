@@ -1,0 +1,11 @@
+name: Hehe
+version: '1.0-SNAPSHOT'
+main: vn.hanh.hehe.Hehe
+api-version: '1.21'
+commands:
+  code:
+    description: "Nhập code"
+    usage: "/code <code>"
+permissions:
+  hehe.redeem:
+    default: true
