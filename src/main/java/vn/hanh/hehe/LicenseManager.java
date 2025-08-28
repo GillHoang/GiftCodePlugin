@@ -1,52 +1,45 @@
 package vn.hanh.hehe;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.*;
+import vn.hanh.hehe.crypto.Ed25519;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
-import vn.hanh.hehe.crypto.Ed25519;
 
-import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
+import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 import java.time.Duration;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-
 /**
- * LicenseManager (Java 17+, Spigot/Paper)
+ * LicenseManager (Java 17+, Spigot/Paper) — IP-only binding (max 3 IPs)
  * - POST /license/validate (JSON)
  * - Verify Ed25519 signature (server signs with private key)
  * - Grace window & periodic check
- * - Only reads license.key (+ optional license.ip) from config.yml
- * <p>
+ * - Chỉ đọc license.key (+ optional license.ip) từ config.yml
+ *
  * config.yml (tối giản):
  * license:
- * key: "xxxx-xxxx-xxxx-xxxx-xxxx"
- * ip: ""   # optional
+ *   key: "xxxx-xxxx-xxxx-xxxx-xxxx"
+ *   ip: ""   # optional: ép IP gửi lên server
  */
 public class LicenseManager {
     private final Plugin plugin;
 
-    // ====== CÁC HẰNG SỐ ẨN TRONG CODE (client không thấy trong config.yml) ======
+    // ====== HẰNG SỐ NHÚNG TRONG CODE ======
     private static final String PLUGIN_ID = "giftcode-plugin"; // phải trùng server
     private static final String VALIDATION_URL = "http://localhost:3000/license/validate";
     private static final int CHECK_INTERVAL_SECONDS = 3600;
     private static final int GRACE_SECONDS = 86400;
     private static final boolean AUTO_CHECK = true;
 
-    // Ed25519 PUBLIC KEY (PEM) – CHỈ LÀ PUBLIC, an toàn để nhúng vào JAR
+    // Ed25519 PUBLIC KEY (PEM)
     private static final String PUBLIC_KEY_PEM =
             "-----BEGIN PUBLIC KEY-----\n" +
                     "MCowBQYDK2VwAyEAWWWZJVjAlGM1v3KV2VJb6lXEzsrHt9S2ZRTnNi7m+eA=\n" +
@@ -54,8 +47,7 @@ public class LicenseManager {
 
     // ====== Runtime/config ======
     private String licenseKey;
-    private String staticIp;     // optional: gửi ip cố định nếu có
-    private String serverId;     // lưu local vào machine.dat
+    private String staticIp;     // optional
     private final AtomicBoolean checking = new AtomicBoolean(false);
 
     private volatile boolean isLicenseValid = false;
@@ -73,7 +65,6 @@ public class LicenseManager {
             plugin.getLogger().severe("[License] Failed to load Ed25519 public key: " + e.getMessage());
         }
         loadMinimalConfig();
-        ensureServerIdFile();
     }
 
     // ---------- Public API ----------
@@ -102,9 +93,7 @@ public class LicenseManager {
         return (System.currentTimeMillis() - lastOkAt) <= (GRACE_SECONDS * 1000L);
     }
 
-    public boolean shouldBlockCommands() {
-        return !isLicenseValid();
-    }
+    public boolean shouldBlockCommands() { return !isLicenseValid(); }
 
     public String getMaskedLicenseKey() {
         if (licenseKey == null || licenseKey.length() < 10) return "xxxx-xxxx-xxxx-xxxx-xxxx";
@@ -131,7 +120,6 @@ public class LicenseManager {
             JsonObject body = new JsonObject();
             body.addProperty("licenseKey", licenseKey);
             body.addProperty("pluginId", PLUGIN_ID);
-            body.addProperty("serverId", serverId);
             if (staticIp != null && !staticIp.isEmpty()) body.addProperty("ip", staticIp);
             if (mcUsername != null && !mcUsername.isEmpty()) body.addProperty("mcUsername", mcUsername);
 
@@ -175,13 +163,12 @@ public class LicenseManager {
             boolean expired = optBool(obj, "expired", false);
             String reason = optString(obj, "reason", null);
             String plan = optString(obj, "plan", null);
-            int boundServers = optInt(obj, "boundServers", 0);
             int boundIps = optInt(obj, "boundIps", 0);
 
             if (valid && active && !expired) {
                 lastOkAt = System.currentTimeMillis();
                 isLicenseValid = true;
-                plugin.getLogger().info("[License] OK (" + plan + "), servers=" + boundServers + ", ips=" + boundIps);
+                plugin.getLogger().info("[License] OK (" + plan + "), ips=" + boundIps);
                 return true;
             } else {
                 String r = (reason != null) ? reason : (expired ? "expired" : "invalid");
@@ -227,69 +214,30 @@ public class LicenseManager {
         return false;
     }
 
-    // ---------- Config & local server-id ----------
+    // ---------- Config ----------
     private void loadMinimalConfig() {
         this.licenseKey = plugin.getConfig().getString("license.key", "xxxx-xxxx-xxxx-xxxx-xxxx");
-        this.staticIp = plugin.getConfig().getString("license.ip", "");
-    }
-
-    private void ensureServerIdFile() {
-        try {
-            File f = new File(plugin.getDataFolder(), "machine.dat");
-            if (!f.getParentFile().exists()) f.getParentFile().mkdirs();
-            if (f.exists()) {
-                this.serverId = new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8).trim();
-                if (!serverId.isEmpty()) return;
-            }
-            this.serverId = UUID.randomUUID().toString();
-            java.nio.file.Files.write(f.toPath(), serverId.getBytes(StandardCharsets.UTF_8));
-            plugin.getLogger().info("[License] Generated server-id.");
-        } catch (Exception e) {
-            try {
-                InetSocketAddress addr = Bukkit.getServer().getIp().isEmpty()
-                        ? new InetSocketAddress(Bukkit.getServer().getPort())
-                        : new InetSocketAddress(Bukkit.getServer().getIp(), Bukkit.getServer().getPort());
-                this.serverId = (addr.getAddress() != null ? addr.getAddress().getHostAddress() : "0.0.0.0")
-                        + ":" + Bukkit.getServer().getPort();
-            } catch (Exception ex) {
-                this.serverId = "unknown:" + Bukkit.getServer().getPort();
-            }
-            plugin.getLogger().warning("[License] Using fallback server-id: " + this.serverId);
-        }
+        this.staticIp   = plugin.getConfig().getString("license.ip", "");
     }
 
     // ---------- JSON helpers ----------
-    private static boolean looksLikeKey(String k) {
-        return k != null && k.matches(KEY_PATTERN);
-    }
-
+    private static boolean looksLikeKey(String k) { return k != null && k.matches(KEY_PATTERN); }
     private static String trimBody(String s) {
         if (s == null) return "";
         s = s.replaceAll("\\s+", " ");
         if (s.length() > 300) s = s.substring(0, 300) + "...";
         return s;
     }
-
     private static boolean optBool(JsonObject o, String k, boolean def) {
         return o.has(k) && o.get(k).isJsonPrimitive() ? o.get(k).getAsBoolean() : def;
     }
-
     private static String optString(JsonObject o, String k, String def) {
         return o.has(k) && o.get(k).isJsonPrimitive() ? o.get(k).getAsString() : def;
     }
-
     private static int optInt(JsonObject o, String k, int def) {
-        try {
-            return o.has(k) && o.get(k).isJsonPrimitive() ? o.get(k).getAsInt() : def;
-        } catch (Exception e) {
-            try {
-                return (int) o.get(k).getAsLong();
-            } catch (Exception ex) {
-                return def;
-            }
-        }
+        try { return o.has(k) && o.get(k).isJsonPrimitive() ? o.get(k).getAsInt() : def; }
+        catch (Exception e) { try { return (int) o.get(k).getAsLong(); } catch (Exception ex) { return def; } }
     }
-
     private static String stripTrailingSignature(String fullJson) {
         if (fullJson == null) return "";
         return fullJson.replaceFirst(",\\s*\"signature\"\\s*:\\s*\"[^\"]*\"\\s*\\}\\s*$", "}");
