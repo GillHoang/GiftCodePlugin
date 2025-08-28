@@ -2,3 +2,5 @@ giftcodes:
   WELCOME:
     - "give %player% diamond 1"
     - "say Chào %player% đã nhập code WELCOME thành côngggg"
+license:
+  key: "xxxx-xxxx-xxxx-xxxx-xxxx"

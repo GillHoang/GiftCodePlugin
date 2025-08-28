@@ -18,11 +18,26 @@ public final class Hehe extends JavaPlugin {
     private final Map<UUID, Long> cooldown = new HashMap<>();
     private File redeemFile;
     private YamlConfiguration redeemCfg;
+    private LicenseManager licenseManager;
 
     @Override
     public void onEnable() {
         // Plugin startup logic
         saveDefaultConfig();
+
+        this.licenseManager = new LicenseManager(this);
+
+        // validate ngay
+        licenseManager.validateAsync(null);
+
+        // kiểm tra định kỳ
+        licenseManager.startPeriodicCheck();
+
+        // ví dụ chặn lệnh nếu chưa hợp lệ (hoặc trong command handlers)
+        if (!licenseManager.isLicenseValid()) {
+            getLogger().warning("Running in limited mode until license validated.");
+        }
+
         Objects.requireNonNull(getCommand("code")).setExecutor(this);
 
         redeemFile = new File(getDataFolder(), "redeem.yml");
@@ -40,6 +55,11 @@ public final class Hehe extends JavaPlugin {
 
         getLogger().info("Hệ thống nhập code đã sẵn sàng");
     }
+
+    public LicenseManager getLicenseManager() {
+        return licenseManager;
+    }
+
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
